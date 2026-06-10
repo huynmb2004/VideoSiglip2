@@ -10,7 +10,13 @@ import torch.nn.functional as F
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from torch.nn.init import _calculate_fan_in_and_fan_out
 
-from configuration_siglip2 import Siglip2Config, Siglip2TextConfig, Siglip2VisionConfig
+from transformers import Siglip2Config, Siglip2TextConfig, Siglip2VisionConfig, PreTrainedModel
+from transformers.modeling_outputs import BaseModelOutputWithPooling, BaseModelOutput, ImageClassifierOutput
+from transformers.activations import ACT2FN
+from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask
+from transformers.modeling_flash_attention_utils import _flash_attention_forward
+from transformers.utils import logging
+logger = logging.get_logger(__name__)
 
 
 @dataclass
