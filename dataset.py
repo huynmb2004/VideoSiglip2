@@ -1,12 +1,14 @@
 import os
 import torch
+import random
 import numpy as np
-import pandas as pd
+import logging
 from torch.utils.data import Dataset, DataLoader
 from decord import VideoReader, cpu
 import decord
 
 decord.bridge.set_bridge('torch')
+logger = logging.getLogger(__name__)
 
 class UCF101VideoDataset(Dataset):
     """
@@ -15,44 +17,87 @@ class UCF101VideoDataset(Dataset):
     """
     def __init__(
         self,
-        csv_file: str,
         base_dir: str,
+        annotation_dir: str,
         processor,
-        num_frames: int = 8,
+        split: int = 1,
         mode: str = 'train',
+        num_frames: int = 8,
     ):
         """
         Args:
-            csv_file (str): Path to the CSV file with annotations.
             base_dir (str): Base directory of the UCF101 dataset.
-            processor: Hugging Face AutoProcessor for SigLIP2 (handles both image and text).
-            num_frames (int): Number of frames to sample per video (T).
-            mode (str): 'train', 'val', or 'test'. Determines the sampling strategy.
+            annotation_dir (str): Directory containing classInd.txt, trainlist01.txt, etc.
+            processor: Hugging Face AutoProcessor for SigLIP2.
+            split (int): Split to use (1, 2, or 3).
+            mode (str): 'train', 'val', or 'test'.
+            num_frames (int): Number of frames to sample per video.
         """
-        self.data = pd.read_csv(csv_file)
         self.base_dir = base_dir
+        self.annotation_dir = annotation_dir
         self.processor = processor
-        self.num_frames = num_frames
+        self.split = split
         self.mode = mode
+        self.num_frames = num_frames
         
-        # Create a label to ID mapping
-        self.unique_labels = sorted(self.data['label'].unique().tolist())
+        # Load label string to original ID map
+        self.class_to_id = self._load_class_mapping()
+            
+        self.unique_labels = sorted(list(self.class_to_id.keys()))
+        
+        # Re-map IDs to contiguous 0..N-1 range
         self.label_to_id = {label: i for i, label in enumerate(self.unique_labels)}
+        self.id_to_label = {i: label for label, i in self.label_to_id.items()}
         
+        self.video_list = self._load_split_list()
+
+    def _load_class_mapping(self):
+        classInd_path = os.path.join(self.annotation_dir, 'classInd.txt')
+        class_to_id = {}
+        with open(classInd_path, 'r') as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) == 2:
+                    class_id = int(parts[0]) - 1
+                    class_name = parts[1]
+                    class_to_id[class_name] = class_id
+        return class_to_id
+
+    def _load_split_list(self):
+        video_list = []
+        if self.mode == 'train':
+            list_file = os.path.join(self.annotation_dir, f'trainlist0{self.split}.txt')
+            with open(list_file, 'r') as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) == 2:
+                        vid_path = parts[0]
+                        class_name = vid_path.split('/')[0]
+                        if class_name in self.class_to_id:
+                            label_id = self.label_to_id[class_name]
+                            video_list.append((vid_path, label_id))
+        else:
+            # test/val sử dụng file testlist
+            list_file = os.path.join(self.annotation_dir, f'testlist0{self.split}.txt')
+            with open(list_file, 'r') as f:
+                for line in f:
+                    vid_path = line.strip()
+                    if vid_path:
+                        class_name = vid_path.split('/')[0]
+                        if class_name in self.class_to_id:
+                            label_id = self.label_to_id[class_name]
+                            video_list.append((vid_path, label_id))
+        return video_list
+
     def __len__(self):
-        return len(self.data)
+        return len(self.video_list)
+
+    def _get_num_classes(self):
+        return len(self.unique_labels)
 
     def _get_frame_indices(self, total_frames: int):
-        """
-        Divide the video into `num_frames` segments.
-        If mode is 'train', randomly select 1 frame from each segment.
-        If mode is 'val'/'test', select the center frame of each segment.
-        """
-        # Ensure we don't try to sample more frames than exist
-        if total_frames < self.num_frames:
-            # Pad by repeating the last frame if necessary, though ideally we just sample with replacement
-            indices = np.linspace(0, total_frames - 1, self.num_frames, dtype=int)
-            return indices
+        if total_frames <= self.num_frames:
+            return np.linspace(0, total_frames - 1, self.num_frames, dtype=int)
 
         seg_size = total_frames / self.num_frames
         indices = []
@@ -60,55 +105,27 @@ class UCF101VideoDataset(Dataset):
             start = int(i * seg_size)
             end = int((i + 1) * seg_size)
             if self.mode == 'train':
-                # Random sampling in the segment
-                idx = np.random.randint(start, end)
+                idx = random.randint(start, max(start, end - 1))
             else:
-                # Center sampling in the segment
                 idx = start + (end - start) // 2
             indices.append(idx)
-            
         return np.array(indices)
 
     def __getitem__(self, idx):
-        row = self.data.iloc[idx]
-        clip_path = row['clip_path']
-        label_str = row['label']
-        label_id = self.label_to_id[label_str]
+        vid_path, label_id = self.video_list[idx]
+        label_str = self.id_to_label[label_id]
+        video_path = os.path.join(self.base_dir, vid_path)
         
-        # Construct the absolute path
-        # clip_path in CSV often starts with a slash, e.g. /train/Swing/...
-        # We use os.path.normpath and os.path.join carefully.
-        # Removing leading slash to ensure os.path.join works correctly
-        if clip_path.startswith('/') or clip_path.startswith('\\'):
-            clip_path = clip_path[1:]
-        video_path = os.path.join(self.base_dir, clip_path)
-        
-        # 1. Read Video Frames
         try:
-            # Initialize VideoReader
             vr = VideoReader(video_path, ctx=cpu(0))
             total_frames = len(vr)
-            
-            # Get indices
             frame_indices = self._get_frame_indices(total_frames)
-            
-            # Fetch frames (Returns shape: (T, H, W, C) in torch uint8)
             frames = vr.get_batch(frame_indices)
-            
         except Exception as e:
-            # Fallback for corrupted videos: return a dummy zero tensor
-            print(f"Error reading video {video_path}: {e}")
-            # The processor expects a list of numpy arrays or PIL Images or torch tensors (C, H, W)
-            # Create dummy black frames (T, 3, 224, 224) roughly
+            # logger.warning(f"Error reading video {video_path}: {e}")
             frames = torch.zeros((self.num_frames, 3, 224, 224), dtype=torch.uint8).permute(0, 2, 3, 1)
 
-        # 2. Text Prompt Generation
         text_prompt = f"A video of a person performing {label_str}"
-        
-        # 3. Apply Processor
-        # AutoProcessor for SigLIP handles images and texts
-        # Images should be a list of 3D tensors (C, H, W) or numpy arrays (H, W, C)
-        # We pass the frames as a list of numpy arrays (H, W, C)
         frames_np = [frame.numpy() for frame in frames]
         
         inputs = self.processor(
@@ -117,16 +134,14 @@ class UCF101VideoDataset(Dataset):
             return_tensors="pt", 
             padding="max_length",
             truncation=True,
-            max_length=64 # Typical max length for SigLIP text
+            max_length=64
         )
         
-        # Extract pixel_values and input_ids
-        # pixel_values shape from processor: (1, T, C, H, W) or (T, C, H, W)
         pixel_values = inputs["pixel_values"]
         if pixel_values.dim() == 5 and pixel_values.shape[0] == 1:
-            pixel_values = pixel_values.squeeze(0) # (T, C, H, W)
+            pixel_values = pixel_values.squeeze(0)
             
-        input_ids = inputs["input_ids"].squeeze(0) # (seq_len,)
+        input_ids = inputs["input_ids"].squeeze(0)
         attention_mask = inputs["attention_mask"].squeeze(0) if "attention_mask" in inputs else None
 
         item = {
@@ -142,31 +157,31 @@ class UCF101VideoDataset(Dataset):
 if __name__ == "__main__":
     from transformers import AutoProcessor
     
-    # Simple test to verify functionality
-    base_dir = r"C:\Users\Admin\.cache\kagglehub\datasets\matthewjansen\ucf101-action-recognition\versions\4"
-    train_csv = os.path.join(base_dir, "train.csv")
+    BASE_DIR = "/media/lqngoc38/data/UCF-101/"
+    ANNOTATION_DIR = "/media/lqngoc38/data/UCF-101/annotations/ucfTrainTestlist/"
     
-    if os.path.exists(train_csv):
+    if os.path.exists(BASE_DIR) and os.path.exists(ANNOTATION_DIR):
         print("Loading Processor...")
         processor = AutoProcessor.from_pretrained("google/siglip2-base-patch16-224")
         
         print("Initializing Dataset...")
         dataset = UCF101VideoDataset(
-            csv_file=train_csv,
-            base_dir=base_dir,
+            base_dir=BASE_DIR,
+            annotation_dir=ANNOTATION_DIR,
             processor=processor,
             num_frames=8,
             mode='train'
         )
         
         print(f"Dataset Size: {len(dataset)}")
-        sample = dataset[0]
-        
-        print("\nSample Output:")
-        print(f"Pixel Values Shape: {sample['pixel_values'].shape}")
-        print(f"Input IDs Shape: {sample['input_ids'].shape}")
-        if sample['attention_mask'] is not None:
-            print(f"Attention Mask Shape: {sample['attention_mask'].shape}")
-        print(f"Label ID: {sample['label_id']} (Maps to: {dataset.unique_labels[sample['label_id'].item()]})")
+        if len(dataset) > 0:
+            sample = dataset[0]
+            print("\nSample Output:")
+            print(f"Pixel Values Shape: {sample['pixel_values'].shape}")
+            print(f"Input IDs Shape: {sample['input_ids'].shape}")
+            if sample.get('attention_mask') is not None:
+                print(f"Attention Mask Shape: {sample['attention_mask'].shape}")
+            print(f"Label ID: {sample['label_id']} (Maps to: {dataset.unique_labels[sample['label_id'].item()]})")
     else:
-        print(f"Could not find train.csv at {train_csv}. Please check the path.")
+        print(f"Could not find dataset at {BASE_DIR} or {ANNOTATION_DIR}.")
+
