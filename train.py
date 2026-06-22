@@ -93,7 +93,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=1e-4)
     
-    num_epochs = 5
+    num_epochs = 64
     for epoch in range(1, num_epochs + 1):
         print(f"\nEpoch [{epoch}/{num_epochs}]")
         model.train()
