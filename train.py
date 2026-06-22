@@ -93,7 +93,14 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=1e-4)
     
-    num_epochs = 64
+    # ================= KHỞI TẠO CHECKPOINT =================
+    checkpoint_dir = "checkpoint"
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    best_val_acc = 0.0
+    print(f"Checkpoints will be saved to: ./{checkpoint_dir}/")
+    # ========================================================
+
+    num_epochs = 32
     for epoch in range(1, num_epochs + 1):
         print(f"\nEpoch [{epoch}/{num_epochs}]")
         model.train()
@@ -109,12 +116,17 @@ def main():
             logits = model(pixel_values)
             loss = criterion(logits, labels)
             
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
             train_running_loss += loss.item()
             _, predicted = torch.max(logits, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
             
             progress_bar.set_postfix({"Loss": f"{loss.item():.4f}", "Acc": f"{100 * correct / total:.2f}%"})
+        
         train_acc = 100 * correct / total
         train_loss = train_running_loss / len(train_loader)
 
@@ -137,11 +149,39 @@ def main():
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
             
-            progress_bar.set_postfix({"Loss": f"{loss.item():.4f}", "Acc": f"{100 * correct / total:.2f}%"})
+                progress_bar.set_postfix({"Loss": f"{loss.item():.4f}", "Acc": f"{100 * correct / total:.2f}%"})
+        
         val_acc = 100 * correct / total
         val_loss = val_running_loss / len(val_loader)
 
         print(f"Summary -> Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+
+        # ================= LƯU CHECKPOINT Ở ĐÂY =================
+        # 1. Lưu định kỳ mỗi 10 epochs
+        if epoch % 10 == 0:
+            checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint_epoch_{epoch}.pt")
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'train_loss': train_loss,
+                'val_loss': val_loss,
+                'val_acc': val_acc
+            }, checkpoint_path)
+            print(f"Đã lưu checkpoint định kỳ tại: {checkpoint_path}")
+
+        # 2. Lưu lại bản có Accuracy trên tập Validation cao nhất (Rất quan trọng)
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_checkpoint_path = os.path.join(checkpoint_dir, "checkpoint_best.pt")
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_acc': val_acc
+            }, best_checkpoint_path)
+            print(f"Đã cập nhật checkpoint TỐT NHẤT: {best_checkpoint_path} (Val Acc: {val_acc:.2f}%)")
+        # ========================================================
 
 if __name__ == "__main__":
     import multiprocessing
