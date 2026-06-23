@@ -1,4 +1,5 @@
 import os
+import argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -15,57 +16,7 @@ decord.bridge.set_bridge('torch')
 
 from dataset import UCF101VideoDataset
 
-def train_one_epoch(model, dataloader, criterion, optimizer, device):
-    model.train()
-    running_loss = 0.0
-    correct = 0
-    total = 0
-    
-    progress_bar = tqdm(dataloader, desc="Training")
-    for batch in progress_bar:
-        pixel_values = batch["pixel_values"].to(device)
-        labels = batch["label_id"].to(device)
-        
-        optimizer.zero_grad()
-        logits = model(pixel_values)
-        loss = criterion(logits, labels)
-        loss.backward()
-        optimizer.step()
-        
-        running_loss += loss.item()
-        _, predicted = torch.max(logits, 1)
-        total += labels.size(0)
-        correct += (predicted == labels).sum().item()
-        
-        progress_bar.set_postfix({"Loss": f"{loss.item():.4f}", "Acc": f"{100 * correct / total:.2f}%"})
-        
-    return running_loss / len(dataloader), 100 * correct / total
-
-def validate(model, dataloader, criterion, device):
-    model.eval()
-    running_loss = 0.0
-    correct = 0
-    total = 0
-    
-    with torch.no_grad():
-        progress_bar = tqdm(dataloader, desc="Validation")
-        for batch in progress_bar:
-            pixel_values = batch["pixel_values"].to(device)
-            labels = batch["label_id"].to(device)
-            
-            logits = model(pixel_values)
-            loss = criterion(logits, labels)
-            
-            running_loss += loss.item()
-            _, predicted = torch.max(logits, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-            
-            progress_bar.set_postfix({"Loss": f"{loss.item():.4f}", "Acc": f"{100 * correct / total:.2f}%"})
-            
-    return running_loss / len(dataloader), 100 * correct / total
-
-def main():
+def main(args):
     base_dir = "/media/lqngoc38/data/UCF-101/"
     annotation_dir = "/media/lqngoc38/data/UCF-101/annotations/ucfTrainTestlist/"
     
@@ -97,11 +48,24 @@ def main():
     checkpoint_dir = "checkpoint"
     os.makedirs(checkpoint_dir, exist_ok=True)
     best_val_acc = 0.0
+    start_epoch = 1
     print(f"Checkpoints will be saved to: ./{checkpoint_dir}/")
+
+    if args.resume:
+        if os.path.isfile(args.resume):
+            print(f"Loading checkpoint from {args.resume}...")
+            checkpoint = torch.load(args.resume, map_location=device, weights_only=False)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            start_epoch = checkpoint['epoch'] + 1
+            best_val_acc = checkpoint.get('val_acc', 0.0)
+            print(f"Resumed training from epoch {checkpoint['epoch']}")
+        else:
+            print(f"No checkpoint found at '{args.resume}', starting from scratch.")
     # ========================================================
 
     num_epochs = 32
-    for epoch in range(1, num_epochs + 1):
+    for epoch in range(start_epoch, num_epochs + 1):
         print(f"\nEpoch [{epoch}/{num_epochs}]")
         model.train()
         train_running_loss = 0.0
@@ -157,8 +121,8 @@ def main():
         print(f"Summary -> Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
 
         # ================= LƯU CHECKPOINT Ở ĐÂY =================
-        # 1. Lưu định kỳ mỗi 10 epochs
-        if epoch % 10 == 0:
+        # 1. Lưu định kỳ mỗi 2 epochs
+        if epoch % 2 == 0:
             checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint_epoch_{epoch}.pt")
             torch.save({
                 'epoch': epoch,
@@ -186,4 +150,7 @@ def main():
 if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()
-    main()
+    parser = argparse.ArgumentParser(description="Train VideoSiglip2")
+    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume training from")
+    args = parser.parse_args()
+    main(args)
