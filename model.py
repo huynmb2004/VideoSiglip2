@@ -21,8 +21,7 @@ class Siglip2LateFusionBaseline(nn.Module):
     def __init__(self, model_name="google/siglip2-base-patch16-224", num_classes=5):
         super().__init__()
         # Load Pretrained SigLIP-2 Base Model
-        self.base_model = AutoModel.from_pretrained(model_name)
-        self.vision_encoder = self.base_model.vision_model
+        self.vision_encoder = SiglipVisionModel.from_pretrained(model_name)
         
         # 1. ABSOLUTELY DO NOT UNFREEZE THE ENTIRE MODEL
         for param in self.vision_encoder.parameters():
@@ -31,7 +30,7 @@ class Siglip2LateFusionBaseline(nn.Module):
         # 2. Inject LoRA adapters via peft
         lora_config = LoraConfig(
             r=16,
-            lora_alpha=16,
+            lora_alpha=32,
             target_modules=["q_proj", "v_proj"],
             lora_dropout=0.1,
             bias="none"

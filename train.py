@@ -42,7 +42,8 @@ def main(args):
     model = Siglip2LateFusionBaseline(model_name=model_name, num_classes=train_dataset._get_num_classes()).to(device)
     
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=1e-4)
+    trainable_params = filter(lambda p: p.requires_grad, model.parameters())
+    optimizer = optim.AdamW(trainable_params, lr=1e-4)
     
     # ================= KHỞI TẠO CHECKPOINT =================
     checkpoint_dir = "checkpoint"
