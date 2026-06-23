@@ -1,0 +1,11 @@
+Using device: cpu
+Loading processor...
+Setting up Datasets and DataLoaders...
+Train Dataset Size: 9537
+Validation Dataset Size: 3783
+Initializing Baseline Model...
+--- LoRA Applied to Vision Encoder ---
+trainable params: 589,824 || all params: 93,474,048 || trainable%: 0.6310
+Checkpoints will be saved to: ./checkpoint/
+
+Epoch [1/32]

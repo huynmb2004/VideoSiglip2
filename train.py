@@ -134,17 +134,17 @@ def main(args):
             }, checkpoint_path)
             print(f"Đã lưu checkpoint định kỳ tại: {checkpoint_path}")
 
-        # 2. Lưu lại bản có Accuracy trên tập Validation cao nhất (Rất quan trọng)
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            best_checkpoint_path = os.path.join(checkpoint_dir, "checkpoint_best.pt")
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'val_acc': val_acc
-            }, best_checkpoint_path)
-            print(f"Đã cập nhật checkpoint TỐT NHẤT: {best_checkpoint_path} (Val Acc: {val_acc:.2f}%)")
+        # # 2. Lưu lại bản có Accuracy trên tập Validation cao nhất (Rất quan trọng)
+        # if val_acc > best_val_acc:
+        #     best_val_acc = val_acc
+        #     best_checkpoint_path = os.path.join(checkpoint_dir, "checkpoint_best.pt")
+        #     torch.save({
+        #         'epoch': epoch,
+        #         'model_state_dict': model.state_dict(),
+        #         'optimizer_state_dict': optimizer.state_dict(),
+        #         'val_acc': val_acc
+        #     }, best_checkpoint_path)
+        #     print(f"Đã cập nhật checkpoint TỐT NHẤT: {best_checkpoint_path} (Val Acc: {val_acc:.2f}%)")
         # ========================================================
 
 if __name__ == "__main__":
