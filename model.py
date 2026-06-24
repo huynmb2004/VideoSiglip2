@@ -1,28 +1,21 @@
-import os
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import numpy as np
-from torch.utils.data import Dataset, DataLoader
-from decord import VideoReader, cpu
 import decord
-from tqdm import tqdm
-from transformers import AutoProcessor, AutoModel
+from transformers import SiglipModel  # <-- Reverted to SiglipModel to perfectly match the hub checkpoint layout
 from peft import LoraConfig, get_peft_model
 
 decord.bridge.set_bridge('torch')
 
-from dataset import UCF101VideoDataset
-
 class Siglip2LateFusionBaseline(nn.Module):
     """
-    Baseline Video Action Recognition model using SigLIP-2 with Late Fusion (Mean Pooling) and LoRA.
+    Baseline Video Action Recognition model using SigLIP with Late Fusion (Mean Pooling) and LoRA.
     """
     def __init__(self, model_name="google/siglip2-base-patch16-224", num_classes=5):
         super().__init__()
-        # Load Pretrained SigLIP-2 Base Model
-        self.vision_encoder = SiglipVisionModel.from_pretrained(model_name)
-        
+        # Load via SiglipModel to preserve the original Conv2d patch embeddings perfectly without resetting weights!
+        full_model = SiglipModel.from_pretrained(model_name)
+        self.vision_encoder = full_model.vision_model
+
         # 1. ABSOLUTELY DO NOT UNFREEZE THE ENTIRE MODEL
         for param in self.vision_encoder.parameters():
             param.requires_grad = False
@@ -41,7 +34,7 @@ class Siglip2LateFusionBaseline(nn.Module):
         self.vision_encoder.print_trainable_parameters()
             
         # Extract hidden size safely from the original wrapped config
-        hidden_size = self.base_model.vision_model.config.hidden_size
+        hidden_size = self.vision_encoder.base_model.config.hidden_size
         
         # 3. Linear Classification Head
         self.classifier = nn.Linear(hidden_size, num_classes)

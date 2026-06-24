@@ -3,7 +3,7 @@ import torch
 import random
 import numpy as np
 import logging
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 from decord import VideoReader, cpu
 import decord
 
@@ -24,15 +24,6 @@ class UCF101VideoDataset(Dataset):
         mode: str = 'train',
         num_frames: int = 8,
     ):
-        """
-        Args:
-            base_dir (str): Base directory of the UCF101 dataset.
-            annotation_dir (str): Directory containing classInd.txt, trainlist01.txt, etc.
-            processor: Hugging Face AutoProcessor for SigLIP2.
-            split (int): Split to use (1, 2, or 3).
-            mode (str): 'train', 'val', or 'test'.
-            num_frames (int): Number of frames to sample per video.
-        """
         self.base_dir = base_dir
         self.annotation_dir = annotation_dir
         self.processor = processor
@@ -40,12 +31,9 @@ class UCF101VideoDataset(Dataset):
         self.mode = mode
         self.num_frames = num_frames
         
-        # Load label string to original ID map
         self.class_to_id = self._load_class_mapping()
-            
         self.unique_labels = sorted(list(self.class_to_id.keys()))
         
-        # Re-map IDs to contiguous 0..N-1 range
         self.label_to_id = {label: i for i, label in enumerate(self.unique_labels)}
         self.id_to_label = {i: label for label, i in self.label_to_id.items()}
         
@@ -77,7 +65,6 @@ class UCF101VideoDataset(Dataset):
                             label_id = self.label_to_id[class_name]
                             video_list.append((vid_path, label_id))
         else:
-            # test/val sử dụng file testlist
             list_file = os.path.join(self.annotation_dir, f'testlist0{self.split}.txt')
             with open(list_file, 'r') as f:
                 for line in f:
@@ -121,12 +108,12 @@ class UCF101VideoDataset(Dataset):
             total_frames = len(vr)
             frame_indices = self._get_frame_indices(total_frames)
             frames = vr.get_batch(frame_indices)
+            frames_np = [frame.numpy() for frame in frames]
         except Exception as e:
-            # logger.warning(f"Error reading video {video_path}: {e}")
-            frames = torch.zeros((self.num_frames, 3, 224, 224), dtype=torch.uint8).permute(0, 2, 3, 1)
+            # Generate actual dummy image numpy structures to prevent decord validation prints
+            frames_np = [np.zeros((224, 224, 3), dtype=np.uint8) for _ in range(self.num_frames)]
 
         text_prompt = f"A video of a person performing {label_str}"
-        frames_np = [frame.numpy() for frame in frames]
         
         inputs = self.processor(
             images=frames_np, 
@@ -153,35 +140,3 @@ class UCF101VideoDataset(Dataset):
             item["attention_mask"] = attention_mask
             
         return item
-
-if __name__ == "__main__":
-    from transformers import AutoProcessor
-    
-    BASE_DIR = "/media/lqngoc38/data/UCF-101/"
-    ANNOTATION_DIR = "/media/lqngoc38/data/UCF-101/annotations/ucfTrainTestlist/"
-    
-    if os.path.exists(BASE_DIR) and os.path.exists(ANNOTATION_DIR):
-        print("Loading Processor...")
-        processor = AutoProcessor.from_pretrained("google/siglip2-base-patch16-224")
-        
-        print("Initializing Dataset...")
-        dataset = UCF101VideoDataset(
-            base_dir=BASE_DIR,
-            annotation_dir=ANNOTATION_DIR,
-            processor=processor,
-            num_frames=8,
-            mode='train'
-        )
-        
-        print(f"Dataset Size: {len(dataset)}")
-        if len(dataset) > 0:
-            sample = dataset[0]
-            print("\nSample Output:")
-            print(f"Pixel Values Shape: {sample['pixel_values'].shape}")
-            print(f"Input IDs Shape: {sample['input_ids'].shape}")
-            if sample.get('attention_mask') is not None:
-                print(f"Attention Mask Shape: {sample['attention_mask'].shape}")
-            print(f"Label ID: {sample['label_id']} (Maps to: {dataset.unique_labels[sample['label_id'].item()]})")
-    else:
-        print(f"Could not find dataset at {BASE_DIR} or {ANNOTATION_DIR}.")
-
