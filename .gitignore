@@ -4,3 +4,5 @@ loss.py
 train_siglip2.py
 video_siglip.py
 siglip2.py
+
+.vscode/
