@@ -8,7 +8,10 @@
 #SBATCH --output=baseline_output.log
 #SBATCH --error=baseline_error.log
 
-module load cuda-11.8.0-gcc-11.4.0-cuusula
+# Workaround for Lmod depends-on error with Spack-generated modules
+export CUDA_HOME=/sw/spack/opt/spack/linux-ubuntu22.04-zen2/gcc-11.4.0/cuda-11.8.0-cuusulake2rypzg22npop46hv5zn2xsp
+export PATH=$CUDA_HOME/bin:$PATH
+export CMAKE_PREFIX_PATH=$CUDA_HOME:$CMAKE_PREFIX_PATH
 source ~/miniconda3/bin/activate
 conda activate sinhvien_env
 
